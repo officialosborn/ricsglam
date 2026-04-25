@@ -1568,17 +1568,27 @@ var cart=[],logoTapCount=0,logoTapTimer=null,currentRevStars=5,editingRevId=null
    PERSIST / LOAD
 ═══════════════════════════════════════════ */
 function save(){
-  try{
-    localStorage.setItem('rg2_products',JSON.stringify(products));
-    localStorage.setItem('rg2_services',JSON.stringify(services));
-    localStorage.setItem('rg2_testimonials',JSON.stringify(testimonials));
-    localStorage.setItem('rg2_categories',JSON.stringify(categories));
-    localStorage.setItem('rg2_social',JSON.stringify(socialLinks));
-    localStorage.setItem('rg2_hero',JSON.stringify(heroData));
-    localStorage.setItem('rg2_cart',JSON.stringify(cart));
+  try {
+    // Save to browser memory
+    localStorage.setItem('rg2_products', JSON.stringify(products));
+    localStorage.setItem('rg2_services', JSON.stringify(services));
+    localStorage.setItem('rg2_reviews', JSON.stringify(reviews));
+    localStorage.setItem('rg2_hero', JSON.stringify(heroData));
+    localStorage.setItem('rg2_cats', JSON.stringify(catPhotos));
+    localStorage.setItem('rg2_social', JSON.stringify(socialLinks));
+
+    // FIX: Clear the fallback cache so users get fresh data immediately
+    localStorage.removeItem('siteData'); 
+
     document.body.classList.remove('editing');
-    showToast('✅ All changes saved!');
-  }catch(e){showToast('⚠️ Save failed — try clearing old data');}
+    showToast('✅ Changes Saved Locally! (Syncing with database...)');
+
+    // Automatically trigger the database upload
+    syncToSupa(); 
+  } catch(e){
+    console.error(e);
+    showToast('⚠️ Save failed');
+  }
 }
 function loadSaved(){
   try{
@@ -2315,38 +2325,45 @@ function handlePSlot(i){
   reader.readAsDataURL(file);markEditing();
 }
 function saveProd(){
-  var name=document.getElementById('pName').value.trim();
-  var cat=document.getElementById('pCat').value;
-  var price=parseFloat(document.getElementById('pPrice').value);
-  var desc=document.getElementById('pDesc').value.trim();
-  var inchMin=parseInt(document.getElementById('pInchMin').value)||null;
-  var inchMax=parseInt(document.getElementById('pInchMax').value)||null;
-  var badge=document.getElementById('pBadge').value.trim();
-  // Always treat editProdId as a STRING for consistent comparison with Supabase IDs
-  var eid=document.getElementById('editProdId').value.trim()||null;
-  if(!name||!desc||isNaN(price)||price<=0){showToast('⚠️ Fill in all required fields.');return;}
-  var imgs=pendingPImgs.filter(Boolean);
+  var name = document.getElementById('pName').value.trim();
+  var cat = document.getElementById('pCat').value;
+  var price = parseFloat(document.getElementById('pPrice').value) || 0;
+  var desc = document.getElementById('pDesc').value.trim();
+  var badge = document.getElementById('pBadge').value.trim();
+  var inchMin = parseInt(document.getElementById('pInchMin').value) || 0;
+  var inchMax = parseInt(document.getElementById('pInchMax').value) || 0;
+  var eid = document.getElementById('editProdId').value;
+
+  var imgs = [];
+  for(var i=0; i<4; i++){
+    var p = document.getElementById('pPrev'+i);
+    if(p && p.src && p.src.startsWith('data:')) imgs.push(p.src);
+  }
+
+  if(!name || !price){ showToast('⚠️ Name and Price required'); return; }
+
   if(eid){
-    // EDIT existing product — match by string ID
-    var idx=products.findIndex(function(p){return String(p.id)===String(eid);});
-    var existingIcon=idx>-1?products[idx].icon:'✨';
-    var finalImgs=imgs.length?imgs:(idx>-1?products[idx].imgs||[]:[]);
-    if(idx>-1){
-      products[idx]={...products[idx],name:name,cat:cat,price:price,desc:desc,
-                     inchMin:inchMin,inchMax:inchMax,badge:badge,imgs:finalImgs};
+    // FIX: Find the existing product and update it instead of adding new
+    var index = products.findIndex(p => String(p.id) === String(eid));
+    if(index !== -1){
+      products[index] = {
+        ...products[index],
+        cat: cat, name: name, price: price, desc: desc, badge: badge, 
+        imgs: imgs, inchMin: inchMin, inchMax: inchMax
+      };
+      showToast('✅ Product updated!');
     }
-    showToast('✅ Product updated!');
-  }else{
-    // NEW product — generate a unique string ID
-    var newId='p'+Date.now();
-    products.push({id:newId,cat:cat,name:name,desc:desc,price:price,badge:badge,
-                   icon:'✨',imgs:imgs,inchMin:inchMin,inchMax:inchMax});
+  } else {
+    // This part stays for brand new products
+    var newId = prodNextId++;
+    products.push({id:newId, cat:cat, name:name, desc:desc, price:price, badge:badge, icon:'✨', imgs:imgs, inchMin:inchMin, inchMax:inchMax});
     showToast('✅ Product added!');
   }
-  closeModal('prodFormOverlay');save();
-  // Immediately sync this single product to Supabase
-  if(_sb){syncToSupa();}else{initSupa(function(){syncToSupa();});}
-  renderBestSellers();filterProds();renderAdmLists();
+  
+  closeModal('prodFormOverlay');
+  renderAll();
+  document.body.classList.add('editing'); // Show the "Save Changes" button
+
 }
 function deleteProd(){
   var eid=document.getElementById('editProdId').value;
@@ -2401,21 +2418,35 @@ function handleSSlot(i){
   reader.readAsDataURL(file);markEditing();
 }
 function saveSvc(){
-  var name=document.getElementById('sName').value.trim();
-  var desc=document.getElementById('sDesc').value.trim();
-  var eid=document.getElementById('editSvcId').value;
-  if(!name||!desc){showToast('⚠️ Fill in all fields.');return;}
-  var imgs=pendingSImgs.filter(Boolean);
-  var icon=imgs.length?'':services.find(function(s){return s.id===eid;})?services.find(function(s){return s.id===eid;}).icon:'✨';
+  var name = document.getElementById('sName').value.trim();
+  var desc = document.getElementById('sDesc').value.trim();
+  var eid = document.getElementById('editSvcId').value;
+
+  var imgs = [];
+  for(var i=0; i<4; i++){
+    var p = document.getElementById('sPrev'+i);
+    if(p && p.src && p.src.startsWith('data:')) imgs.push(p.src);
+  }
+
+  if(!name){ showToast('⚠️ Service Name required'); return; }
+
   if(eid){
-    var idx=services.findIndex(function(s){return String(s.id)===String(eid);});
-    if(idx>-1)services[idx]={...services[idx],name:name,desc:desc,imgs:imgs};
-    showToast('✅ Service updated!');
-  }else{
-    services.push({id:'s'+svcNextId++,name:name,desc:desc,icon:icon,imgs:imgs});
+    // FIX: Update existing service
+    var index = services.findIndex(s => String(s.id) === String(eid));
+    if(index !== -1){
+      services[index] = { ...services[index], name: name, desc: desc, imgs: imgs };
+      showToast('✅ Service updated!');
+    }
+  } else {
+    var newId = 's' + svcNextId++;
+    services.push({id:newId, name:name, desc:desc, icon:'✨', imgs:imgs});
     showToast('✅ Service added!');
   }
-  closeModal('svcFormOverlay');markEditing();renderSvcs();renderAdmLists();
+
+  closeModal('svcFormOverlay');
+  renderAll();
+  document.body.classList.add('editing');
+   
 }
 function deleteSvc(){
   var eid=document.getElementById('editSvcId').value;
