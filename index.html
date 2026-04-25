@@ -1619,7 +1619,6 @@ function doLogin() {
   var err = document.getElementById('loginErr');
   err.innerText = "";
 
-  // 1. ADMIN BYPASS: Check hardcoded credentials first
   if (email === "ritchinduka@gmail.com" && pass === "Admin@123") {
       isAdmin = true;
       currentUser = { email: email, user_metadata: { full_name: "Boss" } };
@@ -1627,10 +1626,9 @@ function doLogin() {
       closeModal('authOverlay');
       updateAuthUI();
       showToast("Welcome back, Boss! 👑");
-      return; // Stops here, doesn't talk to Supabase
+      return;
   }
 
-  // 2. REGULAR USER: Talk to Supabase
   supa.auth.signInWithPassword({ email: email, password: pass })
     .then(function(res) {
       if (res.error) {
@@ -2870,32 +2868,6 @@ async function deleteAccount() {
     if (confirm("Are you SURE? This will permanently delete your account and log you out.")) {
         // Supabase security requires an admin API to fully delete users,
         // so for now we sign them out to simulate the account closure.
-        await supa.auth.signOut();
-        showToast("Account marked for deletion.");
-        setTimeout(() => location.reload(), 1500);
-    }
-}
-   function openUserSettings() {
-    if (!currentUser) return showToast("Please login first");
-    document.getElementById('setUserName').value = currentUser.user_metadata?.full_name || "";
-    openModal('userSettingsOverlay');
-}
-
-async function updateUserProfile() {
-    const newName = document.getElementById('setUserName').value;
-    const { error } = await supa.auth.updateUser({
-        data: { full_name: newName }
-    });
-    if (error) {
-        showToast("Update failed: " + error.message);
-    } else {
-        showToast("Profile updated!");
-        setTimeout(() => location.reload(), 1000);
-    }
-}
-
-async function deleteAccount() {
-    if (confirm("Are you SURE? This will permanently delete your account and log you out.")) {
         await supa.auth.signOut();
         showToast("Account marked for deletion.");
         setTimeout(() => location.reload(), 1500);
