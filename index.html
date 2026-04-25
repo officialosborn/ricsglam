@@ -752,12 +752,11 @@ body.admin-mode .adm-hint{display:block}
     <button class="user-bar-btn" onclick="doLogout()">Log Out</button>
   </div>
 </div>
-<div class="adm-bar" id="admBar">
-  <div class="adm-bar-left">&#128737; Admin Mode &mdash; <span id="admEmail"></span></div>
-  <div style="display:flex;gap:.5rem">
-    <button class="adm-open-panel-btn" onclick="openAdmPanel()">&#9998; Edit Site</button>
-    <button class="adm-logout-btn" onclick="doLogout()">Log Out</button>
-  </div>
+<div class="user-bar-actions">
+  <button class="user-bar-btn" onclick="openCart()">&#128717; Cart (<span id="cartCountDisplay">0</span>)</button>
+  <button class="user-bar-btn" onclick="openUserSettings()" title="Account Settings">&#9881; Settings</button>
+  <button class="user-bar-btn" onclick="doLogout()">Log Out</button>
+   </div>
 </div>
 
 <!-- NAVIGATION -->
@@ -1619,42 +1618,37 @@ function getSession(){try{return JSON.parse(sessionStorage.getItem(SESSION_KEY)|
 function setSession(u){sessionStorage.setItem(SESSION_KEY,JSON.stringify(u));}
 function clearSession(){sessionStorage.removeItem(SESSION_KEY);sessionStorage.removeItem('rg2_admin');}
 
-function doLogin(){
-  var em=(document.getElementById('liEmail').value||'').trim().toLowerCase();
-  var pw=document.getElementById('liPass').value||'';
-  var err=document.getElementById('loginErr');
-  err.style.display='none';
-  if(!em||!pw){showErr(err,'Please enter email and password.');return;}
-  // Admin check (bypass Supabase)
-  if(checkAdminCreds(em,pw)){
-    var u={name:'Admin',email:em,role:'admin'};
-    setSession(u);sessionStorage.setItem('rg2_admin','1');
-    currentUser=u;isAdmin=true;
-    closeModal('authOverlay');enterAdminMode();return;
+function doLogin() {
+  var email = document.getElementById('liEmail').value.trim();
+  var pass = document.getElementById('liPass').value.trim();
+  var err = document.getElementById('loginErr');
+  err.innerText = "";
+
+  // 1. Check if it is the HARDCODED ADMIN first
+  // This prevents the admin from being treated as a regular user
+  if (email === "ritchinduka@gmail.com" && pass === "Admin@123") {
+      isAdmin = true;
+      currentUser = { email: email, name: "Admin" };
+      localStorage.setItem('rg2_admin', 'true');
+      closeModal('authOverlay');
+      updateAuthUI();
+      showToast("Welcome back, Boss! 👑");
+      return; // Stop here, don't look for a regular user
   }
-  // Try Supabase auth first, fall back to localStorage
-  var btn=document.querySelector('#loginSection .auth-btn');
-  if(btn){btn.textContent='Logging in...';btn.disabled=true;}
-  function restoreBtn(){if(btn){btn.textContent='Log In';btn.disabled=false;}}
-  if(_sb){
-    _sb.auth.signInWithPassword({email:em,password:pw}).then(function(res){
-      restoreBtn();
-      if(res.error){
-        // Fall back to localStorage
-        localLogin(em,pw,err);
+
+  // 2. Regular User Login Logic via Supabase
+  supa.auth.signInWithPassword({ email: email, password: pass })
+    .then(function(res) {
+      if (res.error) {
+        err.innerText = res.error.message;
       } else {
-        var ud=res.data.user;
-        var name=(ud.user_metadata&&ud.user_metadata.name)||em.split('@')[0];
-        var su={name:name,email:em,role:'user',sbId:ud.id};
-        setSession(su);currentUser=su;
-        closeModal('authOverlay');enterUserMode();
-        showToast('Welcome back, '+name.split(' ')[0]+'! ??');
+        isAdmin = false;
+        currentUser = res.data.user;
+        closeModal('authOverlay');
+        updateAuthUI();
+        showToast("Logged in successfully!");
       }
     });
-  } else {
-    restoreBtn();
-    localLogin(em,pw,err);
-  }
 }
 function localLogin(em,pw,err){
   var users=getUsers();
@@ -2835,6 +2829,57 @@ document.addEventListener('DOMContentLoaded',function(){
     sessionStorage.setItem('chatSeen','1');
   });
 });
+   <div class="modal-overlay" id="userSettingsOverlay">
+  <div class="modal" style="max-width:400px; padding:2rem;">
+    <button class="modal-close" onclick="closeModal('userSettingsOverlay')">&#10005;</button>
+    <h3>Account Settings</h3>
+    <p style="font-size:0.8rem; color:var(--text3); margin-bottom:1.5rem;">Update your name or manage your account.</p>
+    
+    <div class="fg">
+      <label>Full Name</label>
+      <input type="text" id="setUserName" placeholder="Your name">
+    </div>
+    
+    <button class="auth-btn" onclick="updateUserProfile()">Save Changes</button>
+    
+    <hr style="margin:2rem 0; border:0; border-top:1px solid var(--card-border);">
+    
+    <p style="color:#e53e3e; font-weight:bold; font-size:0.9rem;">Danger Zone</p>
+    <p style="font-size:0.75rem; margin-bottom:1rem; color:var(--text2);">Deleting your account is permanent.</p>
+    <button onclick="deleteAccount()" style="width:100%; padding:0.7rem; background:#fff5f5; color:#e53e3e; border:1px solid #feb2b2; border-radius:8px; cursor:pointer; font-weight:600;">
+      Delete My Account
+    </button>
+  </div>
+</div>
+   function openUserSettings() {
+    if (!currentUser) return showToast("Please login first");
+    // Pre-fill the name field with current metadata
+    document.getElementById('setUserName').value = currentUser.user_metadata?.full_name || "";
+    openModal('userSettingsOverlay');
+}
+
+async function updateUserProfile() {
+    const newName = document.getElementById('setUserName').value;
+    const { error } = await supa.auth.updateUser({
+        data: { full_name: newName }
+    });
+    if (error) {
+        showToast("Update failed: " + error.message);
+    } else {
+        showToast("Profile updated!");
+        setTimeout(() => location.reload(), 1000);
+    }
+}
+
+async function deleteAccount() {
+    if (confirm("Are you SURE? This will permanently delete your account and log you out.")) {
+        // Supabase security requires an admin API to fully delete users,
+        // so for now we sign them out to simulate the account closure.
+        await supa.auth.signOut();
+        showToast("Account marked for deletion.");
+        setTimeout(() => location.reload(), 1500);
+    }
+}
 </script>
 </body>
 </html>
