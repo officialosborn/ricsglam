@@ -1569,7 +1569,7 @@ var cart=[],logoTapCount=0,logoTapTimer=null,currentRevStars=5,editingRevId=null
 ═══════════════════════════════════════════ */
 function save(){
   try {
-    // Save to browser memory
+    // 1. Save all data to the browser's temporary memory
     localStorage.setItem('rg2_products', JSON.stringify(products));
     localStorage.setItem('rg2_services', JSON.stringify(services));
     localStorage.setItem('rg2_reviews', JSON.stringify(reviews));
@@ -1577,14 +1577,20 @@ function save(){
     localStorage.setItem('rg2_cats', JSON.stringify(catPhotos));
     localStorage.setItem('rg2_social', JSON.stringify(socialLinks));
 
-    // FIX: Clear the fallback cache so users get fresh data immediately
+    // 2. Clear the "Fallback" cache so the site doesn't show old data
     localStorage.removeItem('siteData'); 
 
     document.body.classList.remove('editing');
-    showToast('✅ Changes Saved Locally! (Syncing with database...)');
+    showToast('✅ Changes Saved! Syncing...');
 
-    // Automatically trigger the database upload
+    // 3. Send the data to your Supabase database
     syncToSupa(); 
+
+    // 4. Force the page to refresh so the new items/images appear
+    setTimeout(() => {
+        location.reload();
+    }, 1500); 
+
   } catch(e){
     console.error(e);
     showToast('⚠️ Save failed');
